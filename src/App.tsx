@@ -1254,8 +1254,22 @@ export default function App() {
         cartCount={cartCount}
         unreadNotificationCount={unreadNotificationCount}
         searchQuery={searchQuery}
+        onSearchLiveChange={(query) => {
+          setSearchQuery(query);
+          if (customerTab === 'search' || customerTab === 'deals') {
+            return;
+          }
+          if (query.trim().length > 0) {
+            setSelectedCategory('All');
+            setVisualSearch(null);
+            setSelectedProductId(null);
+            setCustomerTab('search');
+          }
+        }}
         onSearchSubmit={(query) => {
           setSearchQuery(query);
+          setSelectedCategory('All');
+          setVisualSearch(null);
           setSelectedProductId(null);
           setCustomerTab('search');
         }}
@@ -1305,6 +1319,8 @@ export default function App() {
               onAddToCart={handleAddToCart}
               onSearchSubmit={(query) => {
                 setSearchQuery(query);
+                setSelectedCategory('All');
+                setVisualSearch(null);
                 setCustomerTab('search');
               }}
               onOpenCategory={(cat) => {

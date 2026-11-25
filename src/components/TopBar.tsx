@@ -4,6 +4,8 @@ import {
   Camera,
   Grid2X2,
   Home,
+  Mic,
+  MicOff,
   Package,
   Plus,
   Search,
@@ -11,6 +13,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useVoiceSearch } from '../hooks/useVoiceSearch.ts';
+import { VoiceSearchBanner } from './VoiceSearchBanner.tsx';
 import type { User, UserRole } from '../types.ts';
 
 export type CustomerTab =
@@ -36,6 +40,7 @@ interface TopBarProps {
   cartCount: number;
   unreadNotificationCount: number;
   searchQuery: string;
+  onSearchLiveChange?: (query: string) => void;
   onSearchSubmit: (query: string) => void;
   onOpenCameraSearch: () => void;
   onOpenAddProduct: () => void;
@@ -52,6 +57,7 @@ export function TopBar({
   cartCount,
   unreadNotificationCount,
   searchQuery,
+  onSearchLiveChange,
   onSearchSubmit,
   onOpenCameraSearch,
   onOpenAddProduct,
@@ -62,6 +68,17 @@ export function TopBar({
   useEffect(() => {
     setLocalSearch(searchQuery);
   }, [searchQuery]);
+
+  const voice = useVoiceSearch({
+    onTranscriptUpdate: (text) => {
+      setLocalSearch(text);
+      onSearchLiveChange?.(text);
+    },
+    onSearchComplete: (finalText) => {
+      setLocalSearch(finalText);
+      onSearchSubmit(finalText);
+    },
+  });
 
   const customerNav: { id: CustomerTab; label: string; badge?: number }[] = [
     { id: 'home', label: 'Home' },
@@ -119,17 +136,27 @@ export function TopBar({
               <input
                 type="text"
                 value={localSearch}
-                onChange={(e) => setLocalSearch(e.target.value)}
+                onChange={(e) => {
+                  if (voice.isListening) voice.cancelListening();
+                  const nextVal = e.target.value;
+                  setLocalSearch(nextVal);
+                  onSearchLiveChange?.(nextVal);
+                }}
                 placeholder="Search electronics, clothes, groceries, specs, or 'under 500'..."
-                className="w-full pl-10 pr-24 py-2 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#BBA5D5] focus:border-[#FF783D] focus:outline-none"
+                className="w-full pl-10 pr-32 py-2 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#BBA5D5] focus:border-[#FF783D] focus:outline-none"
               />
               <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 {localSearch && (
                   <button
                     type="button"
                     onClick={() => {
+                      if (voice.isListening) voice.cancelListening();
                       setLocalSearch('');
-                      onSearchSubmit('');
+                      if (onSearchLiveChange) {
+                        onSearchLiveChange('');
+                      } else {
+                        onSearchSubmit('');
+                      }
                     }}
                     aria-label="Clear search"
                     className="p-1 text-[#5E5468] hover:text-[#24152F] rounded-md cursor-pointer"
@@ -137,6 +164,23 @@ export function TopBar({
                     <X className="w-3.5 h-3.5" strokeWidth={2} />
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
+                  aria-label={voice.isListening ? 'Stop Listening' : 'Search by voice'}
+                  title={voice.isListening ? 'Stop Listening' : 'Voice Search'}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    voice.isListening
+                      ? 'bg-[#C83E4D] text-[#FFFFFF] animate-pulse'
+                      : 'bg-[#BBA5D5] text-[#24152F] hover:bg-[#D9F36A]'
+                  }`}
+                >
+                  {voice.isListening ? (
+                    <MicOff className="w-3.5 h-3.5" strokeWidth={2.2} />
+                  ) : (
+                    <Mic className="w-3.5 h-3.5" strokeWidth={2} />
+                  )}
+                </button>
                 <button
                   type="button"
                   onClick={onOpenCameraSearch}
@@ -243,6 +287,19 @@ export function TopBar({
             )}
           </div>
         </div>
+
+        {role === 'customer' && (voice.isListening || voice.errorMessage) && (
+          <div className="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 pb-3">
+            <VoiceSearchBanner
+              status={voice.status}
+              transcript={voice.transcript}
+              errorMessage={voice.errorMessage}
+              onStopListening={voice.stopListening}
+              onDismissError={voice.clearError}
+              variant="dark"
+            />
+          </div>
+        )}
 
         {/* Desktop Complete Navigation Bar */}
         <nav

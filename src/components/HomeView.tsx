@@ -11,6 +11,8 @@ import {
   Footprints,
   Home as HomeIcon,
   Laptop,
+  Mic,
+  MicOff,
   PackageCheck,
   Search,
   Shirt,
@@ -24,6 +26,8 @@ import {
 } from 'lucide-react';
 import { ProductCard } from './ProductCard.tsx';
 import { ProductImage } from './ProductImage.tsx';
+import { VoiceSearchBanner } from './VoiceSearchBanner.tsx';
+import { useVoiceSearch } from '../hooks/useVoiceSearch.ts';
 import { formatINR } from '../utils/currency.ts';
 import type { Product } from '../types.ts';
 
@@ -74,6 +78,14 @@ export function HomeView({
   onOpenCameraSearch,
 }: HomeViewProps) {
   const [heroSearch, setHeroSearch] = useState('');
+
+  const voice = useVoiceSearch({
+    onTranscriptUpdate: (text) => setHeroSearch(text),
+    onSearchComplete: (finalText) => {
+      setHeroSearch(finalText);
+      onSearchSubmit(finalText);
+    },
+  });
 
   // Special Offers & Active Group Discounts
   const specialOffers = products
@@ -144,37 +156,70 @@ export function HomeView({
             </p>
 
             {/* Hero Search Bar */}
-            <form onSubmit={handleHeroSearchSubmit} className="flex flex-col sm:flex-row gap-2.5 max-w-xl">
-              <div className="relative flex-1">
-                <Search
-                  className="w-4 h-4 text-[#24152F] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                  strokeWidth={2}
-                />
-                <input
-                  type="text"
-                  value={heroSearch}
-                  onChange={(e) => setHeroSearch(e.target.value)}
-                  placeholder="Search earphones, t-shirts, groceries, or 'under 500'..."
-                  className="w-full pl-10 pr-12 py-3 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#BBA5D5] focus:border-[#FF783D] focus:outline-none"
-                />
+            <div className="max-w-xl">
+              <form onSubmit={handleHeroSearchSubmit} className="flex flex-col sm:flex-row gap-2.5">
+                <div className="relative flex-1">
+                  <Search
+                    className="w-4 h-4 text-[#24152F] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    strokeWidth={2}
+                  />
+                  <input
+                    type="text"
+                    value={heroSearch}
+                    onChange={(e) => {
+                      if (voice.isListening) voice.cancelListening();
+                      setHeroSearch(e.target.value);
+                    }}
+                    placeholder="Search earphones, t-shirts, groceries, or 'under 500'..."
+                    className="w-full pl-10 pr-24 py-3 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#BBA5D5] focus:border-[#FF783D] focus:outline-none"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
+                      aria-label={voice.isListening ? 'Stop Listening' : 'Search by voice'}
+                      title={voice.isListening ? 'Stop Listening' : 'Voice Search'}
+                      className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                        voice.isListening
+                          ? 'bg-[#C83E4D] text-[#FFFFFF] animate-pulse'
+                          : 'bg-[#BBA5D5] hover:bg-[#D9F36A] text-[#24152F]'
+                      }`}
+                    >
+                      {voice.isListening ? (
+                        <MicOff className="w-4 h-4" strokeWidth={2.2} />
+                      ) : (
+                        <Mic className="w-4 h-4" strokeWidth={2} />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onOpenCameraSearch}
+                      aria-label="Search with camera"
+                      title="Visual Camera Search"
+                      className="p-1.5 rounded-lg bg-[#BBA5D5] hover:bg-[#D9F36A] text-[#24152F] cursor-pointer transition-colors"
+                    >
+                      <Camera className="w-4 h-4" strokeWidth={2} />
+                    </button>
+                  </div>
+                </div>
                 <button
-                  type="button"
-                  onClick={onOpenCameraSearch}
-                  aria-label="Search with camera"
-                  title="Visual Camera Search"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-[#BBA5D5] hover:bg-[#D9F36A] text-[#24152F] cursor-pointer transition-colors"
+                  type="submit"
+                  className="px-6 py-3 rounded-xl bg-[#FF783D] hover:bg-[#F26324] text-[#24152F] text-sm font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0"
                 >
-                  <Camera className="w-4 h-4" strokeWidth={2} />
+                  <span>Search Store</span>
+                  <ArrowRight className="w-4 h-4" strokeWidth={2.2} />
                 </button>
-              </div>
-              <button
-                type="submit"
-                className="px-6 py-3 rounded-xl bg-[#FF783D] hover:bg-[#F26324] text-[#24152F] text-sm font-extrabold inline-flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0"
-              >
-                <span>Search Store</span>
-                <ArrowRight className="w-4 h-4" strokeWidth={2.2} />
-              </button>
-            </form>
+              </form>
+
+              <VoiceSearchBanner
+                status={voice.status}
+                transcript={voice.transcript}
+                errorMessage={voice.errorMessage}
+                onStopListening={voice.stopListening}
+                onDismissError={voice.clearError}
+                variant="dark"
+              />
+            </div>
 
             {/* Primary Promo Actions + Key Highlights */}
             <div className="flex flex-wrap items-center gap-3 pt-1">

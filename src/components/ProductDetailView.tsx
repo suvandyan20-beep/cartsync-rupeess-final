@@ -310,7 +310,12 @@ export function ProductDetailView({
               </div>
             </div>
 
-            <p className="text-sm text-[#29232F] leading-relaxed">{product.description}</p>
+            <div className="p-4 rounded-xl bg-[#F2EBFF] border-2 border-[#C8B6E8] space-y-1">
+              <div className="text-[11px] uppercase tracking-wider font-extrabold text-[#5B3A8C]">
+                Seller Description
+              </div>
+              <p className="text-sm text-[#24152F] leading-relaxed">{product.description}</p>
+            </div>
 
             {/* Pricing & Stock */}
             <div className="pt-4 border-t border-[#E6D8CB] flex items-baseline justify-between gap-4">
@@ -837,7 +842,7 @@ export function ProductDetailView({
                     {product.insights.discrepancies.map((d, idx) => (
                       <div
                         key={`${d.specName}_${idx}`}
-                        className="p-3.5 rounded-xl border-2 border-[#E6D8CB] bg-[#FFF8F0] space-y-1.5 text-xs"
+                        className="p-3.5 rounded-xl border-2 border-[#E6D8CB] bg-[#FFFFFF] space-y-2.5 text-xs"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-extrabold text-[#24152F]">{d.specName}</span>
@@ -852,11 +857,19 @@ export function ProductDetailView({
                             </span>
                           </span>
                         </div>
-                        <div className="text-[#5E5468]">
-                          <strong className="text-[#24152F]">Advertised:</strong> {d.advertisedClaim}
-                        </div>
-                        <div className="text-[#29232F]">
-                          <strong>Verified buyers:</strong> {d.verifiedFeedback}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div className="p-2.5 rounded-xl bg-[#F2EBFF] border border-[#C8B6E8] text-[#24152F]">
+                            <strong className="block text-[11px] uppercase tracking-wider text-[#5B3A8C] mb-0.5">
+                              Description Says
+                            </strong>
+                            <span>{d.advertisedClaim}</span>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-[#E6F6F8] border border-[#A3D5DC] text-[#24152F]">
+                            <strong className="block text-[11px] uppercase tracking-wider text-[#165D68] mb-0.5">
+                              Verified Reviews Say
+                            </strong>
+                            <span>{d.verifiedFeedback}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -955,13 +968,13 @@ export function ProductDetailView({
                   ))}
                 </div>
 
-                <div className="divide-y divide-[#E6D8CB] border-2 border-[#E6D8CB] rounded-2xl overflow-hidden">
+                <div className="divide-y divide-[#A3D5DC] border-2 border-[#2A7B88] rounded-2xl overflow-hidden">
                   {filteredReviews.map((rev) => {
                     const isFlagged = rev.aiTrustFlag === 'flagged_suspicious';
                     return (
                       <article
                         key={rev.id}
-                        className={`p-4 space-y-2 ${isFlagged ? 'bg-[#FFF8F0]' : 'bg-[#FFFFFF]'}`}
+                        className={`p-4 space-y-2 ${isFlagged ? 'bg-[#FFF0F2]' : 'bg-[#E6F6F8]'}`}
                       >
                         {isFlagged && (
                           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#C83E4D] text-[11px] text-[#FFFFFF]">
@@ -973,19 +986,19 @@ export function ProductDetailView({
                         )}
                         <div className="flex items-center justify-between gap-2 text-xs">
                           <span className="font-extrabold text-[#24152F]">
-                            <span className="font-mono mr-1.5 text-[#FF783D]">{rev.rating}★</span>
+                            <span className="font-mono mr-1.5 text-[#165D68]">{rev.rating}★</span>
                             {rev.title}
                           </span>
-                          <span className="text-[11px] text-[#5E5468] font-semibold shrink-0">
+                          <span className="text-[11px] text-[#165D68] font-semibold shrink-0">
                             {rev.authorName} · {rev.verifiedPurchase ? 'Verified' : 'Unverified'}
                           </span>
                         </div>
-                        <p className="text-xs text-[#29232F] leading-relaxed">{rev.body}</p>
+                        <p className="text-xs text-[#24152F] leading-relaxed">{rev.body}</p>
                       </article>
                     );
                   })}
                   {filteredReviews.length === 0 && (
-                    <div className="p-6 text-center text-xs text-[#5E5468]">
+                    <div className="p-6 text-center text-xs text-[#165D68] bg-[#E6F6F8]">
                       No reviews match this filter.
                     </div>
                   )}
@@ -1059,21 +1072,21 @@ export function ProductDetailView({
             {/* PANEL 4: ADVERTISED SPECIFICATIONS */}
             {activePanel === 'specs' && (
               <div className="space-y-4">
-                <div className="pb-3 border-b border-[#E6D8CB]">
-                  <div className="text-[11px] uppercase tracking-widest font-extrabold text-[#FF783D]">
+                <div className="pb-3 border-b border-[#C8B6E8]">
+                  <div className="text-[11px] uppercase tracking-widest font-extrabold text-[#5B3A8C]">
                     Seller Listing Details
                   </div>
                   <h2 className="font-display text-xl font-extrabold text-[#24152F]">
                     Advertised Technical Specifications
                   </h2>
                 </div>
-                <div className="divide-y divide-[#E6D8CB]">
+                <div className="p-4 rounded-2xl bg-[#F2EBFF] border-2 border-[#7C5BA6] divide-y divide-[#D6C7F0]">
                   {product.specs.map((spec) => (
                     <div
                       key={spec.label}
                       className="flex items-baseline justify-between gap-4 py-3 text-sm"
                     >
-                      <span className="text-[#5E5468] font-medium">{spec.label}</span>
+                      <span className="text-[#45385A] font-medium">{spec.label}</span>
                       <span className="font-bold text-[#24152F] text-right">{spec.value}</span>
                     </div>
                   ))}

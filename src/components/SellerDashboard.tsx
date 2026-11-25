@@ -395,13 +395,21 @@ export function SellerDashboard({
                     </div>
 
                     {gaps.length > 0 && (
-                      <div className="space-y-1.5 pt-2 border-t border-[#E6D8CB]">
+                      <div className="space-y-2 pt-2 border-t border-[#E6D8CB]">
                         {gaps.map((g, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs text-[#29232F]">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#FF783D]" strokeWidth={2} />
-                            <span>
-                              <strong>{g.specName}:</strong> Advertised "{g.advertisedClaim}" vs. buyer feedback "{g.verifiedFeedback}"
-                            </span>
+                          <div key={i} className="space-y-1.5 text-xs text-[#29232F]">
+                            <div className="flex items-center gap-1.5 font-extrabold text-[#24152F]">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[#FF783D]" strokeWidth={2} />
+                              <span>{g.specName}</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="p-2 rounded-lg bg-[#F2EBFF] border border-[#C8B6E8] text-[#24152F]">
+                                <strong className="text-[#5B3A8C]">Advertised:</strong> {g.advertisedClaim}
+                              </div>
+                              <div className="p-2 rounded-lg bg-[#E6F6F8] border border-[#A3D5DC] text-[#24152F]">
+                                <strong className="text-[#165D68]">Reviews:</strong> {g.verifiedFeedback}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>

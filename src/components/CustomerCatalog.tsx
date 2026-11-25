@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import {
   Camera,
   ChevronRight,
+  Mic,
+  MicOff,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -9,7 +11,12 @@ import {
   X,
 } from 'lucide-react';
 import { ProductCard } from './ProductCard.tsx';
-import { rankProductsByQuery } from '../utils/productSearch.ts';
+import { VoiceSearchBanner } from './VoiceSearchBanner.tsx';
+import { useVoiceSearch } from '../hooks/useVoiceSearch.ts';
+import {
+  parseSearchQuery,
+  rankProductsByQuery,
+} from '../utils/productSearch.ts';
 import type { Product, VisualSearchResult } from '../types.ts';
 
 export const CATALOG_CATEGORIES = [
@@ -79,6 +86,13 @@ export function CustomerCatalog({
   const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'in_stock' | 'group_deal'>(
     'all'
   );
+
+  const voice = useVoiceSearch({
+    onTranscriptUpdate: (text) => onSearchChange(text),
+    onSearchComplete: (finalText) => onSearchChange(finalText),
+  });
+
+  const parsedQuery = useMemo(() => parseSearchQuery(search), [search]);
 
   const baseProducts = useMemo(() => {
     if (visualSearch) {
@@ -154,6 +168,7 @@ export function CustomerCatalog({
     Boolean(visualSearch);
 
   function handleResetAll() {
+    if (voice.isListening) voice.cancelListening();
     setPriceRange('all');
     setMinRating('all');
     setAvailabilityFilter('all');
@@ -189,66 +204,116 @@ export function CustomerCatalog({
 
       {/* Search, Filter & Sort Controls Panel */}
       <section className="p-5 sm:p-6 rounded-2xl bg-[#FFFFFF] border-2 border-[#24152F] shadow-card space-y-5">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search
-              className="w-4 h-4 text-[#24152F] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
-              strokeWidth={2}
-            />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search electronics, t-shirts, groceries, specs, or 'under 500'..."
-              className="w-full pl-11 pr-24 py-3 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#E6D8CB] focus:border-[#FF783D] focus:outline-none"
-            />
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
-              {search && (
+        <div className="space-y-1">
+          <div className="flex flex-col lg:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search
+                className="w-4 h-4 text-[#24152F] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
+                strokeWidth={2}
+              />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  if (voice.isListening) voice.cancelListening();
+                  onSearchChange(e.target.value);
+                }}
+                placeholder="Search electronics, t-shirts, groceries, specs, or 'under 500'..."
+                className="w-full pl-11 pr-36 sm:pr-44 py-3 text-sm bg-[#FFF8F0] text-[#29232F] placeholder:text-[#5E5468] rounded-xl border-2 border-[#E6D8CB] focus:border-[#FF783D] focus:outline-none"
+              />
+              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (voice.isListening) voice.cancelListening();
+                      onSearchChange('');
+                    }}
+                    aria-label="Clear search query"
+                    className="p-1.5 text-[#5E5468] hover:text-[#24152F] rounded-lg cursor-pointer"
+                  >
+                    <X className="w-4 h-4" strokeWidth={2} />
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => onSearchChange('')}
-                  aria-label="Clear search query"
-                  className="p-1.5 text-[#5E5468] hover:text-[#24152F] rounded-lg cursor-pointer"
+                  onClick={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
+                  aria-label={voice.isListening ? 'Stop Listening' : 'Search by voice'}
+                  title={voice.isListening ? 'Stop Listening' : 'Voice Search'}
+                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                    voice.isListening
+                      ? 'bg-[#C83E4D] text-[#FFFFFF] animate-pulse'
+                      : 'bg-[#BBA5D5] text-[#24152F] hover:bg-[#D9F36A]'
+                  }`}
                 >
-                  <X className="w-4 h-4" strokeWidth={2} />
+                  {voice.isListening ? (
+                    <MicOff className="w-4 h-4" strokeWidth={2.2} />
+                  ) : (
+                    <Mic className="w-4 h-4" strokeWidth={2} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenCameraSearch}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#24152F] text-[#D9F36A] hover:bg-[#352145] text-xs font-bold cursor-pointer"
+                >
+                  <Camera className="w-3.5 h-3.5" strokeWidth={2} />
+                  <span className="hidden sm:inline">Visual Search</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 shrink-0">
+              <select
+                value={sortBy}
+                onChange={(e) => onSortByChange(e.target.value as SearchSortOption)}
+                aria-label="Sort products"
+                className="px-4 py-3 text-xs font-bold bg-[#FFF8F0] text-[#24152F] border-2 border-[#24152F] rounded-xl focus:border-[#FF783D] focus:outline-none cursor-pointer"
+              >
+                <option value="featured">Sort: Featured</option>
+                <option value="popularity">Sort: Popularity</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="price_desc">Price: High to Low</option>
+                <option value="rating_desc">Highest Verified Rating</option>
+              </select>
+
+              {hasAnyFacet && (
+                <button
+                  type="button"
+                  onClick={handleResetAll}
+                  className="inline-flex items-center gap-1.5 px-4 py-3 text-xs font-bold bg-[#BBA5D5] text-[#24152F] border-2 border-[#24152F] hover:bg-[#a98fcb] rounded-xl cursor-pointer whitespace-nowrap"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
+                  <span>Clear</span>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={onOpenCameraSearch}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#24152F] text-[#D9F36A] hover:bg-[#352145] text-xs font-bold cursor-pointer"
-              >
-                <Camera className="w-3.5 h-3.5" strokeWidth={2} />
-                <span className="hidden sm:inline">Visual Search</span>
-              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <select
-              value={sortBy}
-              onChange={(e) => onSortByChange(e.target.value as SearchSortOption)}
-              aria-label="Sort products"
-              className="px-4 py-3 text-xs font-bold bg-[#FFF8F0] text-[#24152F] border-2 border-[#24152F] rounded-xl focus:border-[#FF783D] focus:outline-none cursor-pointer"
-            >
-              <option value="featured">Sort: Featured</option>
-              <option value="popularity">Sort: Popularity</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-              <option value="rating_desc">Highest Verified Rating</option>
-            </select>
+          <VoiceSearchBanner
+            status={voice.status}
+            transcript={voice.transcript}
+            errorMessage={voice.errorMessage}
+            onStopListening={voice.stopListening}
+            onDismissError={voice.clearError}
+            variant="light"
+          />
 
-            {hasAnyFacet && (
-              <button
-                type="button"
-                onClick={handleResetAll}
-                className="inline-flex items-center gap-1.5 px-4 py-3 text-xs font-bold bg-[#BBA5D5] text-[#24152F] border-2 border-[#24152F] hover:bg-[#a98fcb] rounded-xl cursor-pointer whitespace-nowrap"
-              >
-                <RotateCcw className="w-3.5 h-3.5" strokeWidth={2} />
-                <span>Clear</span>
-              </button>
-            )}
-          </div>
+          {(parsedQuery.maxPrice !== null || parsedQuery.minPrice !== null) && (
+            <div className="pt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-[#5E5468]">
+              <span>Applied price query:</span>
+              {parsedQuery.maxPrice !== null && (
+                <span className="font-mono font-bold text-[#24152F]">
+                  Under ₹{parsedQuery.maxPrice.toLocaleString('en-IN')}
+                </span>
+              )}
+              {parsedQuery.minPrice !== null && (
+                <span className="font-mono font-bold text-[#24152F]">
+                  Over ₹{parsedQuery.minPrice.toLocaleString('en-IN')}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Category Pills */}
@@ -366,27 +431,63 @@ export function CustomerCatalog({
       )}
 
       {/* Results Grid / Empty State */}
-      <section id="catalog-grid">
+      <section id="catalog-grid" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-[#5E5468]">
+          <span className="tabular-nums">
+            Showing <strong className="text-[#24152F]">{filtered.length}</strong>{' '}
+            {filtered.length === 1 ? 'matching product' : 'matching products'}
+            {search.trim() ? (
+              <>
+                {' '}
+                for <span className="text-[#24152F]">&ldquo;{search.trim()}&rdquo;</span>
+              </>
+            ) : null}
+          </span>
+          {search.trim() && filtered.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (voice.isListening) voice.cancelListening();
+                onSearchChange('');
+              }}
+              className="inline-flex items-center gap-1 text-[#FF783D] hover:text-[#24152F] font-extrabold cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={2.2} />
+              <span>Clear search &amp; view full catalogue</span>
+            </button>
+          )}
+        </div>
+
         {filtered.length === 0 ? (
-          <div className="p-12 text-center border-2 border-[#E6D8CB] rounded-2xl bg-[#FFFFFF] space-y-4">
+          <div className="p-10 text-center border-2 border-[#E6D8CB] rounded-2xl bg-[#FFFFFF] space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-[#FFF8F0] border-2 border-[#24152F] mx-auto flex items-center justify-center">
               <Search className="w-6 h-6 text-[#FF783D]" strokeWidth={2} />
             </div>
             <div className="space-y-1">
               <h2 className="font-display text-xl font-extrabold text-[#24152F]">
-                No matching products found
+                No products found for this search.
               </h2>
               <p className="text-sm text-[#5E5468] max-w-md mx-auto">
-                No products matched{search ? ` "${search}"` : ''} with your current price, rating, or availability filters.
+                No products matched{search.trim() ? ` "${search.trim()}"` : ''} with your current
+                price, category, rating, or availability filters. Clear your search to return to
+                the full catalogue.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
                 onClick={handleResetAll}
-                className="px-5 py-2.5 text-xs font-extrabold bg-[#FF783D] text-[#24152F] border-2 border-[#24152F] rounded-xl cursor-pointer"
+                className="px-5 py-2.5 text-xs font-extrabold bg-[#FF783D] hover:bg-[#F26324] text-[#24152F] border-2 border-[#24152F] rounded-xl cursor-pointer"
               >
-                Reset All Filters
+                Clear Search &amp; Return to Full Catalogue
+              </button>
+              <button
+                type="button"
+                onClick={() => (voice.isListening ? voice.stopListening() : voice.startListening())}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-extrabold bg-[#BBA5D5] text-[#24152F] border-2 border-[#24152F] rounded-xl cursor-pointer"
+              >
+                <Mic className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>Try Voice Search Again</span>
               </button>
               <button
                 type="button"
@@ -394,7 +495,7 @@ export function CustomerCatalog({
                 className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-extrabold bg-[#24152F] text-[#D9F36A] rounded-xl cursor-pointer"
               >
                 <Camera className="w-3.5 h-3.5" strokeWidth={2} />
-                <span>Try Visual Camera Search</span>
+                <span>Visual Camera Search</span>
               </button>
             </div>
           </div>

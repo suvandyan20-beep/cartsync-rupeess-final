@@ -168,29 +168,34 @@ export function SpecComparisonModal({
           {/* Side-by-Side: What the Description Says vs. What the Reviews Say */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Left: Description & Advertised Specs */}
-            <div className="border-2 border-[#E6D8CB] rounded-2xl p-5 bg-[#FFFFFF] space-y-4">
-              <div className="flex items-center gap-2 border-b-2 border-[#E6D8CB] pb-3">
-                <FileText className="w-4 h-4 text-[#FF783D] shrink-0" strokeWidth={2} />
-                <h3 className="text-sm font-extrabold text-[#24152F]">
-                  What the Description Says
-                </h3>
+            <div className="border-2 border-[#7C5BA6] rounded-2xl p-5 bg-[#F2EBFF] space-y-4">
+              <div className="flex items-center justify-between gap-2 border-b-2 border-[#C8B6E8] pb-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[#5B3A8C] shrink-0" strokeWidth={2.2} />
+                  <h3 className="text-sm font-extrabold text-[#24152F]">
+                    What the Description Says
+                  </h3>
+                </div>
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#5B3A8C]">
+                  Seller Claim
+                </span>
               </div>
 
-              <p className="text-sm text-[#5E5468] leading-relaxed">
+              <p className="text-sm text-[#24152F] leading-relaxed">
                 {product.description}
               </p>
 
-              <div className="space-y-2 pt-2 border-t border-[#E6D8CB]">
-                <div className="text-[11px] uppercase tracking-[0.14em] font-extrabold text-[#5E5468]">
+              <div className="space-y-2 pt-2 border-t border-[#C8B6E8]">
+                <div className="text-[11px] uppercase tracking-[0.14em] font-extrabold text-[#5B3A8C]">
                   Advertised Specifications
                 </div>
-                <div className="divide-y divide-[#E6D8CB]">
+                <div className="divide-y divide-[#D6C7F0]">
                   {product.specs.map((spec) => (
                     <div
                       key={spec.label}
                       className="flex items-baseline justify-between gap-3 py-2 text-xs"
                     >
-                      <span className="text-[#5E5468]">{spec.label}</span>
+                      <span className="text-[#45385A] font-medium">{spec.label}</span>
                       <span className="font-bold text-[#24152F] text-right">{spec.value}</span>
                     </div>
                   ))}
@@ -199,18 +204,22 @@ export function SpecComparisonModal({
             </div>
 
             {/* Right: What Verified Reviews Say */}
-            <div className="border-2 border-[#E6D8CB] rounded-2xl p-5 bg-[#FFFFFF] space-y-4">
-              <div className="flex items-center justify-between gap-2 border-b-2 border-[#E6D8CB] pb-3">
+            <div className="border-2 border-[#2A7B88] rounded-2xl p-5 bg-[#E6F6F8] space-y-4">
+              <div className="flex items-center justify-between gap-2 border-b-2 border-[#A3D5DC] pb-3">
                 <div className="flex items-center gap-2">
-                  <MessageSquareQuote className="w-4 h-4 text-[#FF783D] shrink-0" strokeWidth={2} />
+                  <MessageSquareQuote className="w-4 h-4 text-[#165D68] shrink-0" strokeWidth={2.2} />
                   <h3 className="text-sm font-extrabold text-[#24152F]">
                     What Customer Reviews Say
                   </h3>
                 </div>
-                {product.flaggedCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-xs text-[#24152F] font-bold">
-                    <ShieldAlert className="w-3.5 h-3.5 text-[#FF783D] shrink-0" strokeWidth={2} />
+                {product.flaggedCount > 0 ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-[#165D68] font-bold">
+                    <ShieldAlert className="w-3.5 h-3.5 text-[#C83E4D] shrink-0" strokeWidth={2} />
                     <span>{product.flaggedCount} suspicious excluded</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#165D68]">
+                    Buyer Feedback
                   </span>
                 )}
               </div>
@@ -267,30 +276,30 @@ export function SpecComparisonModal({
 
             {discrepancies.length > 0 ? (
               <div className="border-2 border-[#E6D8CB] rounded-2xl overflow-hidden bg-[#FFFFFF]">
-                <div className="hidden md:grid grid-cols-12 bg-[#24152F] px-4 py-3 text-xs font-extrabold text-[#D9F36A]">
-                  <div className="col-span-2">Feature</div>
-                  <div className="col-span-4">Description Says</div>
-                  <div className="col-span-4">Verified Reviews Say</div>
-                  <div className="col-span-2 text-right">Gap Level</div>
+                <div className="hidden md:grid grid-cols-12 text-xs font-extrabold">
+                  <div className="col-span-2 bg-[#24152F] text-[#D9F36A] px-4 py-3">Feature</div>
+                  <div className="col-span-4 bg-[#5B3A8C] text-[#FFFFFF] px-4 py-3">Description Says</div>
+                  <div className="col-span-4 bg-[#165D68] text-[#FFFFFF] px-4 py-3">Verified Reviews Say</div>
+                  <div className="col-span-2 bg-[#24152F] text-[#D9F36A] px-4 py-3 text-right">Gap Level</div>
                 </div>
                 <div className="divide-y divide-[#E6D8CB]">
                   {discrepancies.map((d, idx) => (
                     <div
                       key={`${d.specName}_${idx}`}
-                      className="grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-3.5 bg-[#FFFFFF] text-xs items-start"
+                      className="grid grid-cols-1 md:grid-cols-12 gap-3 px-4 py-3.5 bg-[#FFFFFF] text-xs items-stretch"
                     >
-                      <div className="md:col-span-2 font-extrabold text-[#24152F]">
+                      <div className="md:col-span-2 font-extrabold text-[#24152F] flex items-center">
                         {d.specName}
                       </div>
-                      <div className="md:col-span-4 text-[#5E5468]">
-                        <span className="md:hidden font-bold text-[#24152F]">Description: </span>
+                      <div className="md:col-span-4 p-2.5 rounded-xl bg-[#F2EBFF] border border-[#C8B6E8] text-[#24152F]">
+                        <span className="md:hidden font-extrabold text-[#5B3A8C] block mb-0.5">Description:</span>
                         {d.advertisedClaim}
                       </div>
-                      <div className="md:col-span-4 text-[#29232F]">
-                        <span className="md:hidden font-bold text-[#24152F]">Reviews: </span>
+                      <div className="md:col-span-4 p-2.5 rounded-xl bg-[#E6F6F8] border border-[#A3D5DC] text-[#24152F]">
+                        <span className="md:hidden font-extrabold text-[#165D68] block mb-0.5">Reviews:</span>
                         {d.verifiedFeedback}
                       </div>
-                      <div className="md:col-span-2 md:text-right">
+                      <div className="md:col-span-2 md:text-right flex items-center md:justify-end">
                         <span
                           className={`inline-flex items-center gap-1 font-extrabold tabular-nums ${
                             d.severity === 'notable' ? 'text-[#C83E4D]' : 'text-[#FF783D]'
@@ -326,18 +335,18 @@ export function SpecComparisonModal({
                 {trustedReviews.slice(0, 4).map((rev) => (
                   <div
                     key={rev.id}
-                    className="p-4 rounded-2xl border-2 border-[#E6D8CB] bg-[#FFFFFF] space-y-1.5"
+                    className="p-4 rounded-2xl border-2 border-[#A3D5DC] bg-[#E6F6F8] space-y-1.5"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">
                       <span className="font-extrabold text-[#24152F] truncate">{rev.title}</span>
-                      <span className="font-mono font-extrabold text-[#FF783D] shrink-0 tabular-nums">
+                      <span className="font-mono font-extrabold text-[#165D68] shrink-0 tabular-nums">
                         {rev.rating}.0 ★
                       </span>
                     </div>
-                    <p className="text-xs text-[#5E5468] leading-relaxed line-clamp-3">
+                    <p className="text-xs text-[#24152F] leading-relaxed line-clamp-3">
                       "{rev.body}"
                     </p>
-                    <div className="text-[11px] font-semibold text-[#5E5468]">
+                    <div className="text-[11px] font-semibold text-[#165D68]">
                       {rev.authorName} · {rev.verifiedPurchase ? 'Verified Buyer' : 'Unverified'}
                     </div>
                   </div>
