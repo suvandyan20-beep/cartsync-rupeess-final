@@ -1,0 +1,8 @@
+{
+  "name": "CartSync",
+  "description": "Smarter Shopping. Seamless Deliveries. Collaborative group buying, combined deliveries, availability scheduling, and AI-verified product trust insights.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
