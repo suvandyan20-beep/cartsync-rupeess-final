@@ -18,6 +18,7 @@ import { CategoriesView } from './components/CategoriesView.tsx';
 import { CustomerCatalog, type SearchSortOption } from './components/CustomerCatalog.tsx';
 import { ProductDetailView } from './components/ProductDetailView.tsx';
 import { GroupDealsView } from './components/GroupDealsView.tsx';
+import { MyGroupsView } from './components/MyGroupsView.tsx';
 import { CartView } from './components/CartView.tsx';
 import { CustomerOrdersView } from './components/CustomerOrdersView.tsx';
 import { NotificationsView } from './components/NotificationsView.tsx';
@@ -38,6 +39,9 @@ import type {
   ProductSpec,
   SavedAddress,
   SellerAnalytics,
+  SocialGroup,
+  SocialGroupCategory,
+  SocialGroupInvitation,
   User,
   VisualSearchResult,
 } from './types.ts';
@@ -66,8 +70,19 @@ export default function App() {
   const [sellerAnalytics, setSellerAnalytics] = useState<SellerAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Cart, Notifications & Modals
+  // Cart, Notifications, My Groups & Modals
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [myGroups, setMyGroups] = useState<SocialGroup[]>([]);
+  const [myGroupInvitations, setMyGroupInvitations] = useState<SocialGroupInvitation[]>([]);
+  const [myGroupsUnreadCount, setMyGroupsUnreadCount] = useState(0);
+  const [initialInviteCode, setInitialInviteCode] = useState<string | null>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('invite') || params.get('mygroup');
+    } catch {
+      return null;
+    }
+  });
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
   const [trackedOrderId, setTrackedOrderId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -121,18 +136,20 @@ export default function App() {
 
   const loadWorkspaceData = useCallback(async (user: User): Promise<CartItem[]> => {
     if (user.role === 'customer') {
-      const [prodRes, orderRes, availRes, cartRes, notifRes] = await Promise.all([
+      const [prodRes, orderRes, availRes, cartRes, notifRes, myGroupsRes] = await Promise.all([
         fetch(`/api/products?userId=${encodeURIComponent(user.id)}`),
         fetch(`/api/orders?customerId=${encodeURIComponent(user.id)}`),
         fetch(`/api/availability/${encodeURIComponent(user.id)}`),
         fetch(`/api/cart/${encodeURIComponent(user.id)}`),
         fetch(`/api/notifications/${encodeURIComponent(user.id)}`),
+        fetch(`/api/my-groups/${encodeURIComponent(user.id)}`),
       ]);
       const prodData = await prodRes.json();
       const orderData = await orderRes.json();
       const availData = await availRes.json();
       const cartData = await cartRes.json();
       const notifData = await notifRes.json();
+      const myGroupsData = myGroupsRes.ok ? await myGroupsRes.json() : {};
       const loadedCart: CartItem[] = cartData.items || [];
       setProducts(prodData.products || []);
       setOrders(orderData.orders || []);
@@ -141,6 +158,9 @@ export default function App() {
       setCart(loadedCart);
       setNotifications(notifData.notifications || []);
       setUnreadNotificationCount(Number(notifData.unreadCount || 0));
+      setMyGroups(myGroupsData.groups || []);
+      setMyGroupInvitations(myGroupsData.invitations || []);
+      setMyGroupsUnreadCount(Number(myGroupsData.totalUnreadCount || 0));
       return loadedCart;
     } else {
       const [prodRes, dealsRes, orderRes, analyticsRes, notifRes] = await Promise.all([
@@ -162,6 +182,9 @@ export default function App() {
       setNotifications(notifData.notifications || []);
       setUnreadNotificationCount(Number(notifData.unreadCount || 0));
       setCart([]);
+      setMyGroups([]);
+      setMyGroupInvitations([]);
+      setMyGroupsUnreadCount(0);
       return [];
     }
   }, []);
@@ -193,6 +216,16 @@ export default function App() {
         if (defaultUser) {
           setCurrentUser(defaultUser);
           await loadWorkspaceData(defaultUser);
+          try {
+            const params = new URLSearchParams(window.location.search);
+            const inviteParam = params.get('invite') || params.get('mygroup');
+            if (inviteParam && defaultUser.role === 'customer') {
+              setCustomerTab('my_groups');
+              setInitialInviteCode(inviteParam);
+            }
+          } catch {
+            // ignore URL errors
+          }
         }
       } finally {
         setLoading(false);
@@ -278,6 +311,9 @@ export default function App() {
     setOrders([]);
     setNotifications([]);
     setUnreadNotificationCount(0);
+    setMyGroups([]);
+    setMyGroupInvitations([]);
+    setMyGroupsUnreadCount(0);
     setSelectedProductId(null);
     setTrackedOrderId(null);
     setConfirmedOrderId(null);
@@ -1102,6 +1138,192 @@ export default function App() {
     });
   }
 
+  // My Groups (Private Social Shopping Groups) handlers
+  const applyMyGroupsPayload = useCallback(
+    (data: {
+      groups?: SocialGroup[];
+      invitations?: SocialGroupInvitation[];
+      totalUnreadCount?: number;
+    }) => {
+      if (Array.isArray(data.groups)) setMyGroups(data.groups);
+      if (Array.isArray(data.invitations)) setMyGroupInvitations(data.invitations);
+      if (typeof data.totalUnreadCount === 'number') {
+        setMyGroupsUnreadCount(data.totalUnreadCount);
+      }
+    },
+    []
+  );
+
+  async function handleCreateSocialGroup(payload: {
+    name: string;
+    category: SocialGroupCategory;
+    description: string;
+  }): Promise<string | null> {
+    if (!currentUser) return null;
+    const res = await fetch('/api/my-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not create group.');
+    }
+    applyMyGroupsPayload(data);
+    showToast(`Created "${payload.name}" shopping group.`);
+    return data.createdGroupId || null;
+  }
+
+  async function handleJoinSocialGroup(codeOrLink: string): Promise<string | null> {
+    if (!currentUser) return null;
+    const res = await fetch('/api/my-groups/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, codeOrLink }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Could not join group.');
+    }
+    applyMyGroupsPayload(data);
+    setInitialInviteCode(null);
+    showToast(
+      data.alreadyMember
+        ? `Opened "${data.groupName}" — you are already a member.`
+        : `Joined "${data.groupName}"!`
+    );
+    return data.joinedGroupId || null;
+  }
+
+  async function handleRespondSocialInvitation(
+    invitationId: string,
+    action: 'accept' | 'decline'
+  ): Promise<string | null> {
+    if (!currentUser) return null;
+    const res = await fetch(
+      `/api/my-groups/invitations/${encodeURIComponent(invitationId)}/respond`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, action }),
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Unable to respond to invitation.');
+      return null;
+    }
+    applyMyGroupsPayload(data);
+    showToast(
+      action === 'accept'
+        ? 'Invitation accepted! Group added to your My Groups list.'
+        : 'Group invitation declined.'
+    );
+    return data.acceptedGroupId || null;
+  }
+
+  const handleMarkSocialGroupRead = useCallback(
+    async (groupId: string) => {
+      if (!currentUser) return;
+      const res = await fetch(`/api/my-groups/${encodeURIComponent(groupId)}/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        applyMyGroupsPayload(data);
+      }
+    },
+    [applyMyGroupsPayload, currentUser]
+  );
+
+  async function handleSendSocialMessage(
+    groupId: string,
+    body: string,
+    productId?: string | null
+  ) {
+    if (!currentUser) return;
+    const res = await fetch(`/api/my-groups/${encodeURIComponent(groupId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, body, productId }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Unable to send group message.');
+      return;
+    }
+    applyMyGroupsPayload(data);
+  }
+
+  async function handleShareProductToGroup(groupId: string, productId: string, note: string) {
+    if (!currentUser) return;
+    const res = await fetch(`/api/my-groups/${encodeURIComponent(groupId)}/products`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, productId, note }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Unable to share product.');
+      return;
+    }
+    applyMyGroupsPayload(data);
+    showToast('Product shared to your group.');
+  }
+
+  async function handleToggleGroupProductVote(groupId: string, productId: string) {
+    if (!currentUser) return;
+    const res = await fetch(
+      `/api/my-groups/${encodeURIComponent(groupId)}/products/${encodeURIComponent(productId)}/vote`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id }),
+      }
+    );
+    const data = await res.json();
+    if (res.ok) {
+      applyMyGroupsPayload(data);
+    }
+  }
+
+  async function handleInviteToSocialGroup(
+    groupId: string,
+    payload: { targetUserId?: string; email?: string }
+  ) {
+    if (!currentUser) return;
+    const res = await fetch(`/api/my-groups/${encodeURIComponent(groupId)}/invite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Unable to send invite.');
+    }
+    applyMyGroupsPayload(data);
+    showToast(`Sent group invitation to ${data.invitedName || 'member'}.`);
+  }
+
+  async function handleLogSocialCartActivity(groupId: string, productName: string) {
+    if (!currentUser) return;
+    const res = await fetch(`/api/my-groups/${encodeURIComponent(groupId)}/activity`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: currentUser.id,
+        actionType: 'added_to_cart',
+        summary: `Added shared item "${productName}" to cart`,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      applyMyGroupsPayload(data);
+    }
+  }
+
   const cartCount = cart.reduce((sum, i) => sum + i.quantity, 0);
   const selectedProduct = selectedProductId
     ? products.find((p) => p.id === selectedProductId) || null
@@ -1253,6 +1475,7 @@ export default function App() {
         }}
         cartCount={cartCount}
         unreadNotificationCount={unreadNotificationCount}
+        unreadMyGroupsCount={myGroupsUnreadCount}
         searchQuery={searchQuery}
         onSearchLiveChange={(query) => {
           setSearchQuery(query);
@@ -1398,6 +1621,27 @@ export default function App() {
               onSelectProduct={openProductDetail}
               onBackHome={() => setCustomerTab('home')}
             />
+          ) : customerTab === 'my_groups' ? (
+            <MyGroupsView
+              currentUser={currentUser}
+              groups={myGroups}
+              invitations={myGroupInvitations}
+              products={products}
+              demoUsers={demoUsers}
+              initialInviteCode={initialInviteCode}
+              onCreateGroup={handleCreateSocialGroup}
+              onJoinGroup={handleJoinSocialGroup}
+              onRespondInvitation={handleRespondSocialInvitation}
+              onMarkGroupRead={handleMarkSocialGroupRead}
+              onSendMessage={handleSendSocialMessage}
+              onShareProduct={handleShareProductToGroup}
+              onToggleProductVote={handleToggleGroupProductVote}
+              onInviteMember={handleInviteToSocialGroup}
+              onAddToCart={handleAddToCart}
+              onLogCartActivity={handleLogSocialCartActivity}
+              onSelectProduct={openProductDetail}
+              onBackHome={() => setCustomerTab('home')}
+            />
           ) : customerTab === 'cart' ? (
             <CartView
               currentUser={currentUser}
@@ -1506,7 +1750,6 @@ export default function App() {
             onExpireGroupNow={handleExpireGroupNow}
             onExpirePaymentWindowNow={handleExpirePaymentWindowNow}
             onUpdateOrderStatus={handleUpdateOrderStatus}
-            onRunAiAudit={handleRunAiAudit}
             onCompareProduct={(id) => setComparisonProductId(id)}
           />
         )}

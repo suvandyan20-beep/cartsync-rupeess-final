@@ -24,6 +24,13 @@ import type {
   Review,
   SavedAddress,
   SellerAnalytics,
+  SocialGroup,
+  SocialGroupActivity,
+  SocialGroupCategory,
+  SocialGroupInvitation,
+  SocialGroupMember,
+  SocialGroupMessage,
+  SocialGroupSharedProduct,
   SpecDiscrepancy,
   User,
 } from './src/types.ts';
@@ -4839,6 +4846,829 @@ app.get('/api/seller/:sellerId/analytics', (req, res) => {
   };
 
   res.json({ analytics });
+});
+
+// ============================================================
+// My Groups (Private Family, Friends & Roommates Groups)
+// ============================================================
+
+const VALID_SOCIAL_CATEGORIES: SocialGroupCategory[] = [
+  'Family',
+  'Friends',
+  'Roommates',
+  'Colleagues',
+  'Neighbors',
+  'Other',
+];
+
+function extractInviteCode(rawInput: string): string {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) return '';
+  try {
+    if (trimmed.includes('://') || trimmed.startsWith('?') || trimmed.includes('invite=') || trimmed.includes('mygroup=')) {
+      const normalizedUrl = trimmed.startsWith('http')
+        ? trimmed
+        : trimmed.startsWith('?')
+        ? `https://cartsync.local/${trimmed}`
+        : `https://cartsync.local/?${trimmed.replace(/^\/+/, '')}`;
+      const url = new URL(normalizedUrl);
+      const paramCode =
+        url.searchParams.get('invite') ||
+        url.searchParams.get('mygroup') ||
+        url.searchParams.get('code');
+      if (paramCode && paramCode.trim()) {
+        return paramCode.trim().toUpperCase();
+      }
+    }
+  } catch {
+    // Fallback to regex/text normalization
+  }
+  const codeMatch = trimmed.toUpperCase().match(/[A-Z]{2,8}-[A-Z0-9]{3,8}/);
+  if (codeMatch) return codeMatch[0];
+  return trimmed.toUpperCase();
+}
+
+function generateGroupInviteCode(category: SocialGroupCategory): string {
+  const prefixMap: Record<SocialGroupCategory, string> = {
+    Family: 'FAM',
+    Friends: 'FRND',
+    Roommates: 'ROOM',
+    Colleagues: 'TEAM',
+    Neighbors: 'NEIGH',
+    Other: 'GRP',
+  };
+  const prefix = prefixMap[category] || 'GRP';
+  for (let i = 0; i < 10; i++) {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    const candidate = `${prefix}-${num}`;
+    const existing = db
+      .prepare('SELECT id FROM social_groups WHERE invite_code = ?')
+      .get(candidate) as { id: string } | undefined;
+    if (!existing) return candidate;
+  }
+  return `${prefix}-${Date.now().toString().slice(-4)}`;
+}
+
+function hydrateSocialGroupsForUser(userId: string): {
+  groups: SocialGroup[];
+  invitations: SocialGroupInvitation[];
+  totalUnreadCount: number;
+} {
+  const allProducts = getEnrichedProducts({ userId });
+  const productMap = new Map<string, Product>(allProducts.map((p) => [p.id, p]));
+
+  const membershipRows = db
+    .prepare(
+      `SELECT sg.id, sg.name, sg.category, sg.description, sg.invite_code, sg.owner_id, sg.created_at,
+              owner.name as owner_name, sgm.last_read_at
+       FROM social_group_members sgm
+       JOIN social_groups sg ON sgm.group_id = sg.id
+       JOIN users owner ON sg.owner_id = owner.id
+       WHERE sgm.user_id = ?
+       ORDER BY sg.created_at DESC`
+    )
+    .all(userId) as Record<string, unknown>[];
+
+  const groups: SocialGroup[] = membershipRows.map((row) => {
+    const groupId = String(row.id);
+    const lastReadAt = row.last_read_at ? String(row.last_read_at) : null;
+
+    const memberRows = db
+      .prepare(
+        `SELECT sgm.user_id, u.name, u.email, u.avatar_initials, sgm.role, sgm.joined_at
+         FROM social_group_members sgm
+         JOIN users u ON sgm.user_id = u.id
+         WHERE sgm.group_id = ?
+         ORDER BY CASE WHEN sgm.role = 'Owner' THEN 0 ELSE 1 END, sgm.joined_at ASC`
+      )
+      .all(groupId) as Record<string, unknown>[];
+
+    const members: SocialGroupMember[] = memberRows.map((m) => ({
+      userId: String(m.user_id),
+      name: String(m.name),
+      email: String(m.email),
+      avatarInitials: String(m.avatar_initials),
+      role: String(m.role) === 'Owner' ? 'Owner' : 'Member',
+      joinedAt: String(m.joined_at),
+    }));
+
+    const sharedRows = db
+      .prepare(
+        `SELECT sgp.id, sgp.group_id, sgp.product_id, sgp.shared_by_user_id, u.name as shared_by_name,
+                sgp.note, sgp.upvotes_json, sgp.created_at
+         FROM social_group_products sgp
+         JOIN users u ON sgp.shared_by_user_id = u.id
+         WHERE sgp.group_id = ?
+         ORDER BY sgp.created_at DESC`
+      )
+      .all(groupId) as Record<string, unknown>[];
+
+    const sharedProducts: SocialGroupSharedProduct[] = [];
+    for (const sp of sharedRows) {
+      const product = productMap.get(String(sp.product_id));
+      if (!product) continue;
+      let upvotes: string[] = [];
+      try {
+        upvotes = JSON.parse(String(sp.upvotes_json || '[]')) as string[];
+      } catch {
+        upvotes = [];
+      }
+      sharedProducts.push({
+        id: String(sp.id),
+        groupId,
+        productId: String(sp.product_id),
+        product,
+        sharedByUserId: String(sp.shared_by_user_id),
+        sharedByName: String(sp.shared_by_name),
+        note: String(sp.note || ''),
+        upvotes,
+        createdAt: String(sp.created_at),
+      });
+    }
+
+    const msgRows = db
+      .prepare(
+        `SELECT m.id, m.group_id, m.sender_id, u.name as sender_name, u.avatar_initials as sender_initials,
+                m.body, m.product_id, m.created_at
+         FROM social_group_messages m
+         JOIN users u ON m.sender_id = u.id
+         WHERE m.group_id = ?
+         ORDER BY m.created_at ASC`
+      )
+      .all(groupId) as Record<string, unknown>[];
+
+    const messages: SocialGroupMessage[] = msgRows.map((msg) => {
+      const attachedProduct = msg.product_id ? productMap.get(String(msg.product_id)) : undefined;
+      return {
+        id: String(msg.id),
+        groupId,
+        senderId: String(msg.sender_id),
+        senderName: String(msg.sender_name),
+        senderInitials: String(msg.sender_initials),
+        body: String(msg.body),
+        productId: msg.product_id ? String(msg.product_id) : null,
+        productName: attachedProduct ? attachedProduct.name : null,
+        productPrice: attachedProduct
+          ? attachedProduct.activeDeal
+            ? Number(
+                (
+                  attachedProduct.price *
+                  (1 - attachedProduct.activeDeal.discountPercent / 100)
+                ).toFixed(2)
+              )
+            : attachedProduct.price
+          : null,
+        productImage: attachedProduct ? attachedProduct.imageUrl : null,
+        createdAt: String(msg.created_at),
+      };
+    });
+
+    const unreadCount = msgRows.filter((msg) => {
+      if (String(msg.sender_id) === userId) return false;
+      if (!lastReadAt) return true;
+      return Date.parse(String(msg.created_at)) > Date.parse(lastReadAt);
+    }).length;
+
+    const actRows = db
+      .prepare(
+        `SELECT id, group_id, actor_name, action_type, summary, created_at
+         FROM social_group_activities
+         WHERE group_id = ?
+         ORDER BY created_at DESC
+         LIMIT 40`
+      )
+      .all(groupId) as Record<string, unknown>[];
+
+    const activities: SocialGroupActivity[] = actRows.map((a) => ({
+      id: String(a.id),
+      groupId,
+      actorName: String(a.actor_name),
+      actionType: String(a.action_type) as SocialGroupActivity['actionType'],
+      summary: String(a.summary),
+      createdAt: String(a.created_at),
+    }));
+
+    const cat = String(row.category) as SocialGroupCategory;
+    return {
+      id: groupId,
+      name: String(row.name),
+      category: VALID_SOCIAL_CATEGORIES.includes(cat) ? cat : 'Other',
+      description: String(row.description || ''),
+      inviteCode: String(row.invite_code),
+      ownerId: String(row.owner_id),
+      ownerName: String(row.owner_name),
+      createdAt: String(row.created_at),
+      unreadCount,
+      members,
+      sharedProducts,
+      messages,
+      activities,
+    };
+  });
+
+  // Sort groups so the most recently active (or created) appear first
+  groups.sort((a, b) => {
+    const aLatest = Math.max(
+      Date.parse(a.createdAt) || 0,
+      a.messages.length ? Date.parse(a.messages[a.messages.length - 1].createdAt) || 0 : 0,
+      a.activities.length ? Date.parse(a.activities[0].createdAt) || 0 : 0
+    );
+    const bLatest = Math.max(
+      Date.parse(b.createdAt) || 0,
+      b.messages.length ? Date.parse(b.messages[b.messages.length - 1].createdAt) || 0 : 0,
+      b.activities.length ? Date.parse(b.activities[0].createdAt) || 0 : 0
+    );
+    return bLatest - aLatest;
+  });
+
+  const invRows = db
+    .prepare(
+      `SELECT inv.id, inv.group_id, inv.status, inv.created_at,
+              sg.name as group_name, sg.category as group_category, sg.invite_code,
+              u.name as invited_by_name,
+              (SELECT COUNT(*) FROM social_group_members m WHERE m.group_id = sg.id) as member_count
+       FROM social_group_invitations inv
+       JOIN social_groups sg ON inv.group_id = sg.id
+       JOIN users u ON inv.invited_by_user_id = u.id
+       WHERE inv.invited_user_id = ? AND inv.status = 'pending'
+       ORDER BY inv.created_at DESC`
+    )
+    .all(userId) as Record<string, unknown>[];
+
+  const invitations: SocialGroupInvitation[] = invRows.map((r) => {
+    const cat = String(r.group_category) as SocialGroupCategory;
+    return {
+      id: String(r.id),
+      groupId: String(r.group_id),
+      groupName: String(r.group_name),
+      groupCategory: VALID_SOCIAL_CATEGORIES.includes(cat) ? cat : 'Other',
+      inviteCode: String(r.invite_code),
+      invitedByName: String(r.invited_by_name),
+      memberCount: Number(r.member_count || 1),
+      status: 'pending',
+      createdAt: String(r.created_at),
+    };
+  });
+
+  const totalUnreadCount =
+    groups.reduce((sum, g) => sum + g.unreadCount, 0) + invitations.length;
+
+  return { groups, invitations, totalUnreadCount };
+}
+
+app.get('/api/my-groups/:userId', (req, res) => {
+  const { userId } = req.params;
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId) as
+    | { id: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.json(payload);
+});
+
+app.post('/api/my-groups', (req, res) => {
+  const { userId, name, category, description } = req.body as {
+    userId?: string;
+    name?: string;
+    category?: SocialGroupCategory;
+    description?: string;
+  };
+  if (!userId || !name || !name.trim()) {
+    return res.status(400).json({ error: 'Group name and user are required.' });
+  }
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const safeCategory: SocialGroupCategory =
+    category && VALID_SOCIAL_CATEGORIES.includes(category) ? category : 'Friends';
+  const groupId = `grp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const inviteCode = generateGroupInviteCode(safeCategory);
+  const now = new Date().toISOString();
+
+  db.prepare(
+    `INSERT INTO social_groups (id, name, category, description, invite_code, owner_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    groupId,
+    name.trim(),
+    safeCategory,
+    (description || '').trim() || `Private ${safeCategory.toLowerCase()} shopping group on CartSync.`,
+    inviteCode,
+    userId,
+    now
+  );
+
+  db.prepare(
+    `INSERT INTO social_group_members (id, group_id, user_id, role, last_read_at, joined_at)
+     VALUES (?, ?, ?, 'Owner', ?, ?)`
+  ).run(`sgm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, groupId, userId, now, now);
+
+  db.prepare(
+    `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+     VALUES (?, ?, ?, 'created', ?, ?)`
+  ).run(
+    `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    user.name,
+    `Created ${name.trim()} (${inviteCode})`,
+    now
+  );
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.status(201).json({ createdGroupId: groupId, ...payload });
+});
+
+app.post('/api/my-groups/join', (req, res) => {
+  const { userId, codeOrLink } = req.body as {
+    userId?: string;
+    codeOrLink?: string;
+  };
+  if (!userId || !codeOrLink || !codeOrLink.trim()) {
+    return res.status(400).json({ error: 'Please enter a group invite code or invitation link.' });
+  }
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const normalizedCode = extractInviteCode(codeOrLink);
+  const group = db
+    .prepare('SELECT id, name, invite_code FROM social_groups WHERE UPPER(invite_code) = ?')
+    .get(normalizedCode) as { id: string; name: string; invite_code: string } | undefined;
+
+  if (!group) {
+    return res.status(404).json({
+      error: `No shopping group found matching code "${normalizedCode}". Check the invite link or code and try again.`,
+    });
+  }
+
+  const existingMember = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(group.id, userId) as { id: string } | undefined;
+
+  const now = new Date().toISOString();
+  if (!existingMember) {
+    db.prepare(
+      `INSERT INTO social_group_members (id, group_id, user_id, role, last_read_at, joined_at)
+       VALUES (?, ?, ?, 'Member', ?, ?)`
+    ).run(`sgm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, group.id, userId, now, now);
+
+    db.prepare(
+      `UPDATE social_group_invitations
+       SET status = 'accepted'
+       WHERE group_id = ? AND invited_user_id = ? AND status = 'pending'`
+    ).run(group.id, userId);
+
+    db.prepare(
+      `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+       VALUES (?, ?, ?, 'joined', ?, ?)`
+    ).run(
+      `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      group.id,
+      user.name,
+      `${user.name} joined via invite code ${group.invite_code}`,
+      now
+    );
+  }
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.json({
+    joinedGroupId: group.id,
+    groupName: group.name,
+    alreadyMember: Boolean(existingMember),
+    ...payload,
+  });
+});
+
+app.post('/api/my-groups/invitations/:invitationId/respond', (req, res) => {
+  const { invitationId } = req.params;
+  const { userId, action } = req.body as {
+    userId?: string;
+    action?: 'accept' | 'decline';
+  };
+  if (!userId || (action !== 'accept' && action !== 'decline')) {
+    return res.status(400).json({ error: 'Valid userId and action (accept or decline) are required.' });
+  }
+
+  const inv = db
+    .prepare(
+      `SELECT inv.id, inv.group_id, inv.invited_user_id, inv.status, sg.name as group_name
+       FROM social_group_invitations inv
+       JOIN social_groups sg ON inv.group_id = sg.id
+       WHERE inv.id = ? AND inv.invited_user_id = ?`
+    )
+    .get(invitationId, userId) as
+    | { id: string; group_id: string; invited_user_id: string; status: string; group_name: string }
+    | undefined;
+
+  if (!inv) {
+    return res.status(404).json({ error: 'Invitation not found.' });
+  }
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const nextStatus = action === 'accept' ? 'accepted' : 'declined';
+  db.prepare('UPDATE social_group_invitations SET status = ? WHERE id = ?').run(nextStatus, invitationId);
+
+  const now = new Date().toISOString();
+  if (action === 'accept') {
+    const existing = db
+      .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+      .get(inv.group_id, userId) as { id: string } | undefined;
+    if (!existing) {
+      db.prepare(
+        `INSERT INTO social_group_members (id, group_id, user_id, role, last_read_at, joined_at)
+         VALUES (?, ?, ?, 'Member', ?, ?)`
+      ).run(
+        `sgm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        inv.group_id,
+        userId,
+        now,
+        now
+      );
+      db.prepare(
+        `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+         VALUES (?, ?, ?, 'joined', ?, ?)`
+      ).run(
+        `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        inv.group_id,
+        user.name,
+        `${user.name} accepted the invitation and joined ${inv.group_name}`,
+        now
+      );
+    }
+  }
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.json({
+    acceptedGroupId: action === 'accept' ? inv.group_id : null,
+    ...payload,
+  });
+});
+
+app.post('/api/my-groups/:groupId/invite', (req, res) => {
+  const { groupId } = req.params;
+  const { userId, targetUserId, email } = req.body as {
+    userId?: string;
+    targetUserId?: string;
+    email?: string;
+  };
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required.' });
+  }
+  const membership = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(groupId, userId) as { id: string } | undefined;
+  if (!membership) {
+    return res.status(403).json({ error: 'Only group members can invite others.' });
+  }
+
+  const inviter = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!inviter) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  const targetUser = targetUserId
+    ? (db.prepare('SELECT id, name, email FROM users WHERE id = ? AND role = ?').get(targetUserId, 'customer') as
+        | { id: string; name: string; email: string }
+        | undefined)
+    : email
+    ? (db
+        .prepare('SELECT id, name, email FROM users WHERE LOWER(email) = LOWER(?) AND role = ?')
+        .get(email.trim(), 'customer') as
+        | { id: string; name: string; email: string }
+        | undefined)
+    : undefined;
+
+  if (!targetUser) {
+    return res.status(404).json({
+      error: 'No customer account found with that email. Share the invite link or group code instead!',
+    });
+  }
+
+  const alreadyMember = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(groupId, targetUser.id) as { id: string } | undefined;
+  if (alreadyMember) {
+    return res.status(400).json({ error: `${targetUser.name} is already a member of this group.` });
+  }
+
+  const pendingInv = db
+    .prepare(
+      `SELECT id FROM social_group_invitations
+       WHERE group_id = ? AND invited_user_id = ? AND status = 'pending'`
+    )
+    .get(groupId, targetUser.id) as { id: string } | undefined;
+  if (pendingInv) {
+    return res.status(400).json({ error: `${targetUser.name} already has a pending invitation.` });
+  }
+
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO social_group_invitations (id, group_id, invited_user_id, invited_by_user_id, status, created_at)
+     VALUES (?, ?, ?, ?, 'pending', ?)`
+  ).run(
+    `sgi_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    targetUser.id,
+    userId,
+    now
+  );
+
+  db.prepare(
+    `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+     VALUES (?, ?, ?, 'invited', ?, ?)`
+  ).run(
+    `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    inviter.name,
+    `Invited ${targetUser.name} to join the group`,
+    now
+  );
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.status(201).json({ invitedName: targetUser.name, ...payload });
+});
+
+app.post('/api/my-groups/:groupId/read', (req, res) => {
+  const { groupId } = req.params;
+  const { userId } = req.body as { userId?: string };
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required.' });
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    'UPDATE social_group_members SET last_read_at = ? WHERE group_id = ? AND user_id = ?'
+  ).run(now, groupId, userId);
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.json(payload);
+});
+
+app.post('/api/my-groups/:groupId/messages', (req, res) => {
+  const { groupId } = req.params;
+  const { userId, body, productId } = req.body as {
+    userId?: string;
+    body?: string;
+    productId?: string | null;
+  };
+  if (!userId || (!body?.trim() && !productId)) {
+    return res.status(400).json({ error: 'Message text or attached product is required.' });
+  }
+
+  const membership = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(groupId, userId) as { id: string } | undefined;
+  if (!membership) {
+    return res.status(403).json({ error: 'Join this group before sending messages.' });
+  }
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  let validProductId: string | null = null;
+  let productName: string | null = null;
+  if (productId) {
+    const prod = db.prepare('SELECT id, name FROM products WHERE id = ?').get(productId) as
+      | { id: string; name: string }
+      | undefined;
+    if (prod) {
+      validProductId = prod.id;
+      productName = prod.name;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const messageText =
+    body?.trim() || (productName ? `Shared ${productName} in chat` : '');
+
+  db.prepare(
+    `INSERT INTO social_group_messages (id, group_id, sender_id, body, product_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `sgmsg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    userId,
+    messageText,
+    validProductId,
+    now
+  );
+
+  db.prepare(
+    'UPDATE social_group_members SET last_read_at = ? WHERE group_id = ? AND user_id = ?'
+  ).run(now, groupId, userId);
+
+  if (productName) {
+    db.prepare(
+      `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+       VALUES (?, ?, ?, 'message', ?, ?)`
+    ).run(
+      `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      groupId,
+      user.name,
+      `Shared ${productName} in group chat`,
+      now
+    );
+  }
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.status(201).json(payload);
+});
+
+app.post('/api/my-groups/:groupId/products', (req, res) => {
+  const { groupId } = req.params;
+  const { userId, productId, note } = req.body as {
+    userId?: string;
+    productId?: string;
+    note?: string;
+  };
+  if (!userId || !productId) {
+    return res.status(400).json({ error: 'userId and productId are required.' });
+  }
+
+  const membership = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(groupId, userId) as { id: string } | undefined;
+  if (!membership) {
+    return res.status(403).json({ error: 'Join this group before sharing products.' });
+  }
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  const product = db.prepare('SELECT id, name FROM products WHERE id = ?').get(productId) as
+    | { id: string; name: string }
+    | undefined;
+
+  if (!user || !product) {
+    return res.status(404).json({ error: 'User or product not found.' });
+  }
+
+  const now = new Date().toISOString();
+  const existing = db
+    .prepare('SELECT id, upvotes_json FROM social_group_products WHERE group_id = ? AND product_id = ?')
+    .get(groupId, productId) as { id: string; upvotes_json: string } | undefined;
+
+  if (existing) {
+    let upvotes: string[] = [];
+    try {
+      upvotes = JSON.parse(existing.upvotes_json || '[]') as string[];
+    } catch {
+      upvotes = [];
+    }
+    if (!upvotes.includes(userId)) upvotes.push(userId);
+    db.prepare(
+      `UPDATE social_group_products
+       SET note = ?, shared_by_user_id = ?, upvotes_json = ?, created_at = ?
+       WHERE id = ?`
+    ).run(
+      (note || '').trim() || `Recommended by ${user.name}`,
+      userId,
+      JSON.stringify(upvotes),
+      now,
+      existing.id
+    );
+  } else {
+    db.prepare(
+      `INSERT INTO social_group_products (id, group_id, product_id, shared_by_user_id, note, upvotes_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `sgp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      groupId,
+      productId,
+      userId,
+      (note || '').trim() || `Shared for group review`,
+      JSON.stringify([userId]),
+      now
+    );
+  }
+
+  db.prepare(
+    `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+     VALUES (?, ?, ?, 'shared_product', ?, ?)`
+  ).run(
+    `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    user.name,
+    `Shared ${product.name}`,
+    now
+  );
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.status(201).json(payload);
+});
+
+app.post('/api/my-groups/:groupId/products/:productId/vote', (req, res) => {
+  const { groupId, productId } = req.params;
+  const { userId } = req.body as { userId?: string };
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required.' });
+  }
+
+  const membership = db
+    .prepare('SELECT id FROM social_group_members WHERE group_id = ? AND user_id = ?')
+    .get(groupId, userId) as { id: string } | undefined;
+  if (!membership) {
+    return res.status(403).json({ error: 'Join this group to vote on products.' });
+  }
+
+  const shared = db
+    .prepare('SELECT id, upvotes_json FROM social_group_products WHERE group_id = ? AND product_id = ?')
+    .get(groupId, productId) as { id: string; upvotes_json: string } | undefined;
+  if (!shared) {
+    return res.status(404).json({ error: 'Shared product not found in this group.' });
+  }
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  const product = db.prepare('SELECT id, name FROM products WHERE id = ?').get(productId) as
+    | { id: string; name: string }
+    | undefined;
+
+  let upvotes: string[] = [];
+  try {
+    upvotes = JSON.parse(shared.upvotes_json || '[]') as string[];
+  } catch {
+    upvotes = [];
+  }
+
+  const alreadyVoted = upvotes.includes(userId);
+  upvotes = alreadyVoted ? upvotes.filter((id) => id !== userId) : [...upvotes, userId];
+
+  db.prepare('UPDATE social_group_products SET upvotes_json = ? WHERE id = ?').run(
+    JSON.stringify(upvotes),
+    shared.id
+  );
+
+  if (!alreadyVoted && user && product) {
+    db.prepare(
+      `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+       VALUES (?, ?, ?, 'voted', ?, ?)`
+    ).run(
+      `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      groupId,
+      user.name,
+      `Marked interest in ${product.name}`,
+      new Date().toISOString()
+    );
+  }
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.json(payload);
+});
+
+app.post('/api/my-groups/:groupId/activity', (req, res) => {
+  const { groupId } = req.params;
+  const { userId, actionType, summary } = req.body as {
+    userId?: string;
+    actionType?: SocialGroupActivity['actionType'];
+    summary?: string;
+  };
+  if (!userId || !summary?.trim()) {
+    return res.status(400).json({ error: 'userId and summary are required.' });
+  }
+
+  const user = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId) as
+    | { id: string; name: string }
+    | undefined;
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+
+  db.prepare(
+    `INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `sga_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    groupId,
+    user.name,
+    actionType || 'added_to_cart',
+    summary.trim(),
+    new Date().toISOString()
+  );
+
+  const payload = hydrateSocialGroupsForUser(userId);
+  res.status(201).json(payload);
 });
 
 async function startServer() {

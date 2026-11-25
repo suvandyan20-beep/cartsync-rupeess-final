@@ -22,6 +22,7 @@ export type CustomerTab =
   | 'categories'
   | 'search'
   | 'deals'
+  | 'my_groups'
   | 'cart'
   | 'orders'
   | 'notifications'
@@ -39,6 +40,7 @@ interface TopBarProps {
   onSelectSellerTab: (tab: SellerTab) => void;
   cartCount: number;
   unreadNotificationCount: number;
+  unreadMyGroupsCount?: number;
   searchQuery: string;
   onSearchLiveChange?: (query: string) => void;
   onSearchSubmit: (query: string) => void;
@@ -56,6 +58,7 @@ export function TopBar({
   onSelectSellerTab,
   cartCount,
   unreadNotificationCount,
+  unreadMyGroupsCount = 0,
   searchQuery,
   onSearchLiveChange,
   onSearchSubmit,
@@ -205,7 +208,7 @@ export function TopBar({
           )}
 
           {/* Right Utility Actions */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={onQuickRoleToggle}
@@ -223,7 +226,7 @@ export function TopBar({
                   : onSelectSellerTab('deals')
               }
               aria-label={`Notifications (${unreadNotificationCount} unread)`}
-              className={`relative p-2.5 rounded-xl border-2 transition-colors cursor-pointer ${
+              className={`relative p-2 sm:p-2.5 rounded-xl border-2 transition-colors cursor-pointer ${
                 role === 'customer' && customerTab === 'notifications'
                   ? 'bg-[#FF783D] text-[#24152F] border-[#D9F36A]'
                   : 'bg-[#352145] text-[#FFFFFF] border-[#BBA5D5] hover:border-[#FF783D]'
@@ -243,7 +246,7 @@ export function TopBar({
                 <button
                   type="button"
                   onClick={() => onSelectCustomerTab('cart')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold border-2 transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-extrabold border-2 transition-colors cursor-pointer whitespace-nowrap ${
                     customerTab === 'cart'
                       ? 'bg-[#D9F36A] text-[#24152F] border-[#FF783D]'
                       : 'bg-[#FF783D] hover:bg-[#F26324] text-[#24152F] border-[#24152F]'
@@ -256,12 +259,33 @@ export function TopBar({
                   </span>
                 </button>
 
+                {/* My Groups Button (Right Next to Cart) */}
+                <button
+                  type="button"
+                  onClick={() => onSelectCustomerTab('my_groups')}
+                  aria-label={`My Groups${unreadMyGroupsCount > 0 ? ` (${unreadMyGroupsCount} unread)` : ''}`}
+                  title="My Groups"
+                  className={`relative inline-flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-extrabold border-2 transition-colors cursor-pointer whitespace-nowrap ${
+                    customerTab === 'my_groups'
+                      ? 'bg-[#FF783D] text-[#24152F] border-[#D9F36A]'
+                      : 'bg-[#352145] hover:bg-[#492F5E] text-[#FFFFFF] border-[#BBA5D5] hover:border-[#FF783D]'
+                  }`}
+                >
+                  <Users className="w-4 h-4 shrink-0" strokeWidth={2.2} />
+                  <span className="hidden sm:inline">My Groups</span>
+                  {unreadMyGroupsCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 rounded-full bg-[#D9F36A] text-[#24152F] border-2 border-[#24152F] text-[10px] font-mono font-extrabold flex items-center justify-center tabular-nums">
+                      {unreadMyGroupsCount > 9 ? '9+' : unreadMyGroupsCount}
+                    </span>
+                  )}
+                </button>
+
                 {/* Profile Button */}
                 <button
                   type="button"
                   onClick={() => onSelectCustomerTab('profile')}
                   aria-label="Open profile and account settings"
-                  className={`inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl border-2 transition-colors cursor-pointer ${
+                  className={`inline-flex items-center gap-2 px-2 sm:px-2.5 py-1.5 rounded-xl border-2 transition-colors cursor-pointer ${
                     customerTab === 'profile'
                       ? 'bg-[#BBA5D5] text-[#24152F] border-[#D9F36A]'
                       : 'bg-[#352145] text-[#FFFFFF] border-[#BBA5D5] hover:border-[#FF783D]'

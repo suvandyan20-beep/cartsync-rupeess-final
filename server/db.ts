@@ -194,6 +194,77 @@ export function initDatabase() {
       source TEXT NOT NULL DEFAULT 'seeded',
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS social_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('Family', 'Friends', 'Roommates', 'Colleagues', 'Neighbors', 'Other')),
+      description TEXT NOT NULL DEFAULT '',
+      invite_code TEXT UNIQUE NOT NULL,
+      owner_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS social_group_members (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('Owner', 'Member')),
+      last_read_at TEXT NOT NULL,
+      joined_at TEXT NOT NULL,
+      UNIQUE(group_id, user_id),
+      FOREIGN KEY (group_id) REFERENCES social_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS social_group_messages (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      product_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (group_id) REFERENCES social_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS social_group_products (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      shared_by_user_id TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      upvotes_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      UNIQUE(group_id, product_id),
+      FOREIGN KEY (group_id) REFERENCES social_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+      FOREIGN KEY (shared_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS social_group_activities (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      actor_name TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (group_id) REFERENCES social_groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS social_group_invitations (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      invited_user_id TEXT NOT NULL,
+      invited_by_user_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined')),
+      created_at TEXT NOT NULL,
+      UNIQUE(group_id, invited_user_id),
+      FOREIGN KEY (group_id) REFERENCES social_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
 
   // Safe schema migration for existing SQLite database
@@ -406,6 +477,7 @@ export function initDatabase() {
 
   ensureMinimumProductReviews();
   seedDeliveryPartnersAndOrderDefaults();
+  seedSocialGroups();
 }
 
 export function resetDatabaseToFirstStage() {
@@ -413,6 +485,12 @@ export function resetDatabaseToFirstStage() {
   db.exec('BEGIN IMMEDIATE;');
   try {
     db.exec(`
+      DELETE FROM social_group_invitations;
+      DELETE FROM social_group_activities;
+      DELETE FROM social_group_products;
+      DELETE FROM social_group_messages;
+      DELETE FROM social_group_members;
+      DELETE FROM social_groups;
       DELETE FROM notifications;
       DELETE FROM order_items;
       DELETE FROM orders;
@@ -2464,6 +2542,291 @@ function seedEverydayIndianEssentialsCatalog() {
     'seeded'
   );
 }
+
+function seedSocialGroups() {
+  const existing = db.prepare('SELECT COUNT(*) as cnt FROM social_groups').get() as { cnt: number };
+  if (existing.cnt > 0) return;
+
+  const tMinus = (mins: number) => new Date(Date.now() - mins * 60000).toISOString();
+
+  const insertGroup = db.prepare(`
+    INSERT INTO social_groups (id, name, category, description, invite_code, owner_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertMember = db.prepare(`
+    INSERT INTO social_group_members (id, group_id, user_id, role, last_read_at, joined_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertMsg = db.prepare(`
+    INSERT INTO social_group_messages (id, group_id, sender_id, body, product_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertProd = db.prepare(`
+    INSERT INTO social_group_products (id, group_id, product_id, shared_by_user_id, note, upvotes_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertAct = db.prepare(`
+    INSERT INTO social_group_activities (id, group_id, actor_name, action_type, summary, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertInv = db.prepare(`
+    INSERT INTO social_group_invitations (id, group_id, invited_user_id, invited_by_user_id, status, created_at)
+    VALUES (?, ?, ?, ?, 'pending', ?)
+  `);
+
+  // 1. Family group (2 unread messages for Maya)
+  insertGroup.run(
+    'grp_family',
+    'Chen Family Essentials',
+    'Family',
+    'Weekly pantry, kitchenware, and household shopping list synced for Saturday combined delivery.',
+    'FAM-4821',
+    'cust_maya',
+    tMinus(1440)
+  );
+  insertMember.run('sgm_fam_1', 'grp_family', 'cust_maya', 'Owner', tMinus(150), tMinus(1440));
+  insertMember.run('sgm_fam_2', 'grp_family', 'cust_liam', 'Member', tMinus(5), tMinus(1380));
+  insertMember.run('sgm_fam_3', 'grp_family', 'cust_priya', 'Member', tMinus(5), tMinus(1300));
+
+  insertProd.run(
+    'sgp_fam_1',
+    'grp_family',
+    'prod_rice',
+    'cust_maya',
+    'Let us combine 4 packs of 1kg basmati rice for this weekend.',
+    JSON.stringify(['cust_maya', 'cust_liam', 'cust_priya']),
+    tMinus(300)
+  );
+  insertProd.run(
+    'sgp_fam_2',
+    'grp_family',
+    'prod_containers',
+    'cust_priya',
+    'Great airtight set for storing pulses and snacks in the pantry.',
+    JSON.stringify(['cust_priya', 'cust_maya']),
+    tMinus(240)
+  );
+  insertProd.run(
+    'sgp_fam_3',
+    'grp_family',
+    'prod_cleaner',
+    'cust_liam',
+    'Need one refill bottle for the kitchen and hall tiles.',
+    JSON.stringify(['cust_liam']),
+    tMinus(190)
+  );
+
+  insertMsg.run(
+    'sgmsg_fam_1',
+    'grp_family',
+    'cust_maya',
+    'Added basmati rice and storage boxes for our weekend combined order!',
+    'prod_rice',
+    tMinus(180)
+  );
+  insertMsg.run(
+    'sgmsg_fam_2',
+    'grp_family',
+    'cust_priya',
+    'I am in for 2 packs of rice and the airtight container set!',
+    'prod_containers',
+    tMinus(45)
+  );
+  insertMsg.run(
+    'sgmsg_fam_3',
+    'grp_family',
+    'cust_liam',
+    'Added the citrus floor cleaner too—let us schedule Saturday morning delivery.',
+    null,
+    tMinus(18)
+  );
+
+  insertAct.run('sga_fam_1', 'grp_family', 'Maya Chen', 'created', 'Created Chen Family Essentials', tMinus(1440));
+  insertAct.run('sga_fam_2', 'grp_family', 'Maya Chen', 'shared_product', 'Shared RoyalGrain Everyday Basmati Rice (1 kg)', tMinus(300));
+  insertAct.run('sga_fam_3', 'grp_family', 'Priya Nair', 'shared_product', 'Shared FreshLock Airtight Storage Set (4 Pcs)', tMinus(240));
+  insertAct.run('sga_fam_4', 'grp_family', 'Liam Patel', 'shared_product', 'Shared SparkleCitrus Floor & Surface Cleaner (1L)', tMinus(190));
+
+  // 2. Roommates group (1 unread message for Maya)
+  insertGroup.run(
+    'grp_roommates',
+    'Belltown Roommates 4B',
+    'Roommates',
+    'Shared apartment appliances, coffee supplies, and split-cost living room essentials.',
+    'ROOM-7392',
+    'cust_alex',
+    tMinus(2100)
+  );
+  insertMember.run('sgm_rm_1', 'grp_roommates', 'cust_alex', 'Owner', tMinus(5), tMinus(2100));
+  insertMember.run('sgm_rm_2', 'grp_roommates', 'cust_maya', 'Member', tMinus(100), tMinus(2000));
+  insertMember.run('sgm_rm_3', 'grp_roommates', 'cust_sam', 'Member', tMinus(5), tMinus(1950));
+
+  insertProd.run(
+    'sgp_rm_1',
+    'grp_roommates',
+    'prod_purifier',
+    'cust_alex',
+    'If we split ₹2,499 three ways for the hall, it is ~₹833 each.',
+    JSON.stringify(['cust_alex', 'cust_sam', 'cust_maya']),
+    tMinus(400)
+  );
+  insertProd.run(
+    'sgp_rm_2',
+    'grp_roommates',
+    'prod_espresso',
+    'cust_sam',
+    'Morning coffee maker pool already has 2/5 joined!',
+    JSON.stringify(['cust_sam', 'cust_maya']),
+    tMinus(320)
+  );
+
+  insertMsg.run(
+    'sgmsg_rm_1',
+    'grp_roommates',
+    'cust_alex',
+    'Hey flatmates, should we get the PureAir purifier together this week?',
+    'prod_purifier',
+    tMinus(140)
+  );
+  insertMsg.run(
+    'sgmsg_rm_2',
+    'grp_roommates',
+    'cust_sam',
+    'Yes! Splitting it three ways works great and we can combine delivery with coffee.',
+    null,
+    tMinus(25)
+  );
+
+  insertAct.run('sga_rm_1', 'grp_roommates', 'Alex Rivera', 'created', 'Created Belltown Roommates 4B', tMinus(2100));
+  insertAct.run('sga_rm_2', 'grp_roommates', 'Alex Rivera', 'shared_product', 'Shared PureAir Compact HEPA Room Purifier', tMinus(400));
+  insertAct.run('sga_rm_3', 'grp_roommates', 'Sam Brooks', 'shared_product', 'Shared Aura Compact Filter & Espresso Maker', tMinus(320));
+
+  // 3. Friends group (all read)
+  insertGroup.run(
+    'grp_friends',
+    'Weekend Tech & Style Crew',
+    'Friends',
+    'Comparing specs, coordinating group drops, and sharing everyday picks with friends.',
+    'FRND-9154',
+    'cust_maya',
+    tMinus(3000)
+  );
+  insertMember.run('sgm_fr_1', 'grp_friends', 'cust_maya', 'Owner', tMinus(10), tMinus(3000));
+  insertMember.run('sgm_fr_2', 'grp_friends', 'cust_priya', 'Member', tMinus(10), tMinus(2900));
+  insertMember.run('sgm_fr_3', 'grp_friends', 'cust_alex', 'Member', tMinus(10), tMinus(2800));
+
+  insertProd.run(
+    'sgp_fr_1',
+    'grp_friends',
+    'prod_headphones',
+    'cust_maya',
+    'Group drop saves ₹144 per unit—3/5 already committed.',
+    JSON.stringify(['cust_maya', 'cust_alex']),
+    tMinus(500)
+  );
+  insertProd.run(
+    'sgp_fr_2',
+    'grp_friends',
+    'prod_sneakers',
+    'cust_priya',
+    'Only 1 spot left to unlock the StrideAir Sneakers pool!',
+    JSON.stringify(['cust_priya', 'cust_maya']),
+    tMinus(420)
+  );
+
+  insertMsg.run(
+    'sgmsg_fr_1',
+    'grp_friends',
+    'cust_priya',
+    'The StrideAir sneakers pool is at 4/5—just needs 1 more person!',
+    'prod_sneakers',
+    tMinus(120)
+  );
+  insertMsg.run(
+    'sgmsg_fr_2',
+    'grp_friends',
+    'cust_maya',
+    'Checked the spec audit—looks solid, ordering half size up.',
+    null,
+    tMinus(60)
+  );
+
+  insertAct.run('sga_fr_1', 'grp_friends', 'Maya Chen', 'created', 'Created Weekend Tech & Style Crew', tMinus(3000));
+  insertAct.run('sga_fr_2', 'grp_friends', 'Priya Nair', 'shared_product', 'Shared StrideAir Knit Everyday Sneakers', tMinus(420));
+
+  // 4. Friends group with pending invitation for Maya (STUDY-2026)
+  insertGroup.run(
+    'grp_study',
+    'Campus Study Circle',
+    'Friends',
+    'Backpacks, student laptops, and desk gear picks for semester prep.',
+    'STUDY-2026',
+    'cust_liam',
+    tMinus(1800)
+  );
+  insertMember.run('sgm_st_1', 'grp_study', 'cust_liam', 'Owner', tMinus(30), tMinus(1800));
+  insertMember.run('sgm_st_2', 'grp_study', 'cust_priya', 'Member', tMinus(30), tMinus(1750));
+
+  insertProd.run(
+    'sgp_st_1',
+    'grp_study',
+    'prod_backpack_commuter',
+    'cust_liam',
+    'Great daily commuter pack for 15.6-inch laptops.',
+    JSON.stringify(['cust_liam', 'cust_priya']),
+    tMinus(600)
+  );
+  insertProd.run(
+    'sgp_st_2',
+    'grp_study',
+    'prod_laptop_oled',
+    'cust_priya',
+    'Student Laptop Group Buy saves 8% right now.',
+    JSON.stringify(['cust_priya']),
+    tMinus(520)
+  );
+  insertMsg.run(
+    'sgmsg_st_1',
+    'grp_study',
+    'cust_liam',
+    'Sent an invite to Maya so we can coordinate backpack & laptop group buys!',
+    'prod_backpack_commuter',
+    tMinus(90)
+  );
+  insertAct.run('sga_st_1', 'grp_study', 'Liam Patel', 'created', 'Created Campus Study Circle', tMinus(1800));
+  insertInv.run('sgi_st_maya', 'grp_study', 'cust_maya', 'cust_liam', tMinus(85));
+
+  // 5. Neighbors group joinable via invite code NEIGH-5501 or invite link
+  insertGroup.run(
+    'grp_neighbors',
+    'Harborview Neighbors Pantry',
+    'Neighbors',
+    'Building neighbors pooling grocery staples and household essentials together.',
+    'NEIGH-5501',
+    'cust_sam',
+    tMinus(1600)
+  );
+  insertMember.run('sgm_nb_1', 'grp_neighbors', 'cust_sam', 'Owner', tMinus(30), tMinus(1600));
+  insertMember.run('sgm_nb_2', 'grp_neighbors', 'cust_alex', 'Member', tMinus(30), tMinus(1500));
+  insertProd.run(
+    'sgp_nb_1',
+    'grp_neighbors',
+    'prod_bottle',
+    'cust_sam',
+    'Everyday stainless bottles for morning walks.',
+    JSON.stringify(['cust_sam']),
+    tMinus(480)
+  );
+  insertMsg.run(
+    'sgmsg_nb_1',
+    'grp_neighbors',
+    'cust_sam',
+    'Welcome neighbors! Share items here so we can consolidate floor deliveries.',
+    null,
+    tMinus(200)
+  );
+  insertAct.run('sga_nb_1', 'grp_neighbors', 'Sam Brooks', 'created', 'Created Harborview Neighbors Pantry', tMinus(1600));
+}
+
 
 
 

@@ -321,3 +321,91 @@ export interface SellerAnalytics {
     flaggedCount: number;
   }[];
 }
+
+export type SocialGroupCategory =
+  | 'Family'
+  | 'Friends'
+  | 'Roommates'
+  | 'Colleagues'
+  | 'Neighbors'
+  | 'Other';
+
+export interface SocialGroupMember {
+  userId: string;
+  name: string;
+  email: string;
+  avatarInitials: string;
+  role: 'Owner' | 'Member';
+  joinedAt: string;
+}
+
+export interface SocialGroupSharedProduct {
+  id: string;
+  groupId: string;
+  productId: string;
+  product: Product;
+  sharedByUserId: string;
+  sharedByName: string;
+  note: string;
+  upvotes: string[];
+  createdAt: string;
+}
+
+export interface SocialGroupMessage {
+  id: string;
+  groupId: string;
+  senderId: string;
+  senderName: string;
+  senderInitials: string;
+  body: string;
+  productId?: string | null;
+  productName?: string | null;
+  productPrice?: number | null;
+  productImage?: string | null;
+  createdAt: string;
+}
+
+export interface SocialGroupActivity {
+  id: string;
+  groupId: string;
+  actorName: string;
+  actionType:
+    | 'created'
+    | 'joined'
+    | 'shared_product'
+    | 'added_to_cart'
+    | 'voted'
+    | 'invited'
+    | 'message';
+  summary: string;
+  createdAt: string;
+}
+
+export interface SocialGroup {
+  id: string;
+  name: string;
+  category: SocialGroupCategory;
+  description: string;
+  inviteCode: string;
+  ownerId: string;
+  ownerName: string;
+  createdAt: string;
+  unreadCount: number;
+  members: SocialGroupMember[];
+  sharedProducts: SocialGroupSharedProduct[];
+  messages: SocialGroupMessage[];
+  activities: SocialGroupActivity[];
+}
+
+export interface SocialGroupInvitation {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupCategory: SocialGroupCategory;
+  inviteCode: string;
+  invitedByName: string;
+  memberCount: number;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+

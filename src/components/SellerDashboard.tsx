@@ -7,7 +7,6 @@ import {
   Package,
   Plus,
   ShieldAlert,
-  Sparkles,
   CalendarClock,
   Users,
   GitCompareArrows,
@@ -64,7 +63,6 @@ interface SellerDashboardProps {
   onExpireGroupNow: (dealId: string) => Promise<void>;
   onExpirePaymentWindowNow: (dealId: string) => Promise<void>;
   onUpdateOrderStatus: (orderId: string, status: Order['fulfillmentStatus']) => Promise<void>;
-  onRunAiAudit: (productId: string) => Promise<void>;
   onCompareProduct: (productId: string) => void;
 }
 
@@ -86,7 +84,6 @@ export function SellerDashboard({
   onExpireGroupNow,
   onExpirePaymentWindowNow,
   onUpdateOrderStatus,
-  onRunAiAudit,
   onCompareProduct,
 }: SellerDashboardProps) {
   const [editingDealId, setEditingDealId] = useState<string | null>(null);
@@ -99,8 +96,6 @@ export function SellerDashboard({
   const [approvalDrafts, setApprovalDrafts] = useState<
     Record<string, { finalGroupPrice: string; paymentWindowHours: number }>
   >({});
-  const [auditingId, setAuditingId] = useState<string | null>(null);
-  const [auditMessage, setAuditMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [busyDealId, setBusyDealId] = useState<string | null>(null);
   const [rejectingDealId, setRejectingDealId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -137,22 +132,6 @@ export function SellerDashboard({
       tier2Discount: tierDraft.tier2Discount ? Number(tierDraft.tier2Discount) : null,
     });
     setEditingDealId(null);
-  }
-
-  async function handleAudit(productId: string) {
-    setAuditingId(productId);
-    setAuditMessage(null);
-    try {
-      await onRunAiAudit(productId);
-      setAuditMessage({ type: 'ok', text: 'Gemini review & spec audit updated for listing.' });
-    } catch (err) {
-      setAuditMessage({
-        type: 'err',
-        text: err instanceof Error ? err.message : 'Unable to run Gemini audit.',
-      });
-    } finally {
-      setAuditingId(null);
-    }
   }
 
   const pendingApprovalDeals = deals.filter((d) => d.stageLabel === 'Pending Seller Approval');
@@ -300,18 +279,6 @@ export function SellerDashboard({
             </div>
           </div>
 
-          {auditMessage && (
-            <div
-              className={`p-3.5 rounded-xl border-2 text-xs font-bold ${
-                auditMessage.type === 'ok'
-                  ? 'bg-[#ECFCCB] border-[#24152F] text-[#24152F]'
-                  : 'bg-[#FEE2E2] border-[#C83E4D] text-[#9E2A3B]'
-              }`}
-            >
-              {auditMessage.text}
-            </div>
-          )}
-
           {/* Product Demand & Trust Table */}
           <div className="space-y-3">
             <h2 className="font-display text-xl font-extrabold text-[#24152F]">
@@ -326,8 +293,7 @@ export function SellerDashboard({
                     <th className="text-right px-4 py-3.5">Units Sold</th>
                     <th className="text-right px-4 py-3.5">Revenue</th>
                     <th className="text-right px-4 py-3.5">Group Demand</th>
-                    <th className="text-right px-4 py-3.5">Verified Rating</th>
-                    <th className="text-right px-5 py-3.5">Trust Audit</th>
+                    <th className="text-right px-5 py-3.5">Verified Rating</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E6D8CB]">
@@ -350,19 +316,8 @@ export function SellerDashboard({
                       <td className="px-4 py-3.5 text-right font-mono tabular-nums text-[#24152F] font-bold">
                         {row.groupParticipants} committed
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono tabular-nums text-[#24152F]">
+                      <td className="px-5 py-3.5 text-right font-mono tabular-nums text-[#24152F]">
                         {row.avgRating} ★
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <button
-                          type="button"
-                          disabled={auditingId === row.productId}
-                          onClick={() => handleAudit(row.productId)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-extrabold text-[#24152F] bg-[#BBA5D5] hover:bg-[#D9F36A] rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" strokeWidth={2} />
-                          <span>{auditingId === row.productId ? 'Auditing...' : 'Run Audit'}</span>
-                        </button>
                       </td>
                     </tr>
                   ))}
